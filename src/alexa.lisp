@@ -86,36 +86,40 @@
                ;; the lex loop.
                (go ,CONTINUE-TAG)))))))
 
-(defmacro define-string-lexer (name &body patterns)
-  (let ((patterns (loop :for (regex . code) :in patterns
-                        :for parse-tree := (let ((cl-ppcre:*allow-named-registers* t))
-                                             `(:SEQUENCE :START-ANCHOR ,(cl-ppcre:parse-string regex)))
-                        :collect (multiple-value-bind (num-regs names)
-                                     (extract-registers parse-tree)
-                                   (make-pattern :regex regex
-                                                 :parse-tree parse-tree
-                                                 :num-registers num-regs
-                                                 :register-names names
-                                                 :code code)))))
-    (alexandria:with-gensyms (continue-tag string start end)
-      `(defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
-         (check-type ,start (integer 0) ":START ")
-         (check-type ,end (integer 0))
-         (assert (<= ,start ,end) (,start ,end) "END must be not be less than START.")
-         (let ((cl-ppcre:*allow-named-registers* t))
-           (lambda ()
-             (block nil
-               (tagbody
-                  ,continue-tag
-                  ;; Have we finished matching string?
-                  (when (= ,start ,end)
-                    ;; Free STRING from closure to allow garbage
-                    ;; collection.
-                    (setq ,string nil)
-                    ;; Return NIL indicating generator is exhausted.
-                    (return nil))
-                  ;; Generate all pattern clauses.
-                  ,@(loop :for pat :in patterns
-                          :collect (generate-pattern pat continue-tag string start end))
-                  ;; Error clause: No match
-                  (error "Couldn't find match at position ~S" ,start)))))))))
+(defmacro define-string-lexer (name &body body)
+  (multiple-value-bind (patterns declarations doc-string)
+      (alexandria:parse-body body :documentation t)
+    (let ((patterns (loop :for (regex . code) :in patterns
+                          :for parse-tree := (let ((cl-ppcre:*allow-named-registers* t))
+                                               `(:SEQUENCE :START-ANCHOR ,(cl-ppcre:parse-string regex)))
+                          :collect (multiple-value-bind (num-regs names)
+                                       (extract-registers parse-tree)
+                                     (make-pattern :regex regex
+                                                   :parse-tree parse-tree
+                                                   :num-registers num-regs
+                                                   :register-names names
+                                                   :code code)))))
+      (alexandria:with-gensyms (continue-tag string start end)
+        `(defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
+           ,@(alexandria:ensure-list doc-string)
+           ,@declarations
+           (check-type ,start (integer 0) ":START ")
+           (check-type ,end (integer 0))
+           (assert (<= ,start ,end) (,start ,end) "END must be not be less than START.")
+           (let ((cl-ppcre:*allow-named-registers* t))
+             (lambda ()
+               (block nil
+                 (tagbody
+                    ,continue-tag
+                    ;; Have we finished matching string?
+                    (when (= ,start ,end)
+                      ;; Free STRING from closure to allow garbage
+                      ;; collection.
+                      (setq ,string nil)
+                      ;; Return NIL indicating generator is exhausted.
+                      (return nil))
+                    ;; Generate all pattern clauses.
+                    ,@(loop :for pat :in patterns
+                            :collect (generate-pattern pat continue-tag string start end))
+                    ;; Error clause: No match
+                    (error "Couldn't find match at position ~S" ,start))))))))))
