@@ -86,19 +86,39 @@
                ;; the lex loop.
                (go ,CONTINUE-TAG)))))))
 
+(defun fill-in-aliases (aliases regex)
+  (labels ((extract-name-from-match (match)
+             (subseq match 2 (- (length match) 2)))
+           (lookup-alias (alias-name)
+             (let ((needle (find alias-name aliases :key #'first
+                                                    :test #'string=)))
+               (when (null needle)
+                 (error "Undefined alias ~S in expression ~S" alias-name regex))
+               (second needle))))
+    (let ((alias-regex "\\{\\{(\\w|\\-|\\_)+\\}\\}")
+          (resulting-regex regex))
+      (cl-ppcre:do-matches-as-strings (match alias-regex regex resulting-regex)
+        (let ((substitution (lookup-alias (extract-name-from-match match))))
+          (setf resulting-regex (cl-ppcre:regex-replace-all `(:sequence ,match)
+                                                            resulting-regex
+                                                            substitution)))))))
+
 (defmacro define-string-lexer (name &body body)
-  (multiple-value-bind (patterns declarations doc-string)
+  (multiple-value-bind (definitions-and-patterns declarations doc-string)
       (alexandria:parse-body body :documentation t)
-    (let ((patterns (loop :for (regex . code) :in patterns
-                          :for parse-tree := (let ((cl-ppcre:*allow-named-registers* t))
-                                               `(:SEQUENCE :START-ANCHOR ,(cl-ppcre:parse-string regex)))
-                          :collect (multiple-value-bind (num-regs names)
-                                       (extract-registers parse-tree)
-                                     (make-pattern :regex regex
-                                                   :parse-tree parse-tree
-                                                   :num-registers num-regs
-                                                   :register-names names
-                                                   :code code)))))
+    (let* ((definitions (first definitions-and-patterns))
+           (patterns (loop :for (regex . code) :in (rest definitions-and-patterns)
+                           :for parse-tree := (let ((cl-ppcre:*allow-named-registers* t))
+                                                `(:SEQUENCE :START-ANCHOR
+                                                  ,(cl-ppcre:parse-string
+                                                    (fill-in-aliases definitions regex))))
+                           :collect (multiple-value-bind (num-regs names)
+                                        (extract-registers parse-tree)
+                                      (make-pattern :regex regex
+                                                    :parse-tree parse-tree
+                                                    :num-registers num-regs
+                                                    :register-names names
+                                                    :code code)))))
       (alexandria:with-gensyms (continue-tag string start end)
         `(defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
            ,@(alexandria:ensure-list doc-string)
