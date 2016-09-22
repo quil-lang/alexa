@@ -1,14 +1,19 @@
 ;;;; alexa.asd
 ;;;;
 ;;;; Author: Robert Smith
+;;;;
+;;;; Copyright (c) 2016 Rigetti & Co, Inc.
 
 (asdf:defsystem #:alexa
   :description "A lexical analyzer generator"
   :author "Robert Smith <robert@rigetti.com>"
-  :pathname "src/"
+  :license "BSD 3-clause (See LICENSE.txt)"
   :depends-on (#:alexandria
                #:cl-ppcre)
   :serial t
-  :components ((:file "package")
-               (:file "alexa")))
+  :components ((:static-file "LICENSE.txt")
+               (:module src
+                :serial t
+                :components ((:file "package")
+                             (:file "alexa")))))
 
