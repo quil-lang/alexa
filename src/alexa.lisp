@@ -104,6 +104,45 @@
                                                             substitution)))))))
 
 (defmacro define-string-lexer (name &body body)
+  "Define a lexical analyzer named NAME.
+
+Defining a lexical analyzer is actually defining a function named NAME whose lambda list is
+
+    (STRING &KEY (START 0) (END (LENGTH STRING)))
+
+The STRING is the string to be analyzed, and START/END are the
+starting and ending positions to be looked at. Calling the function named NAME will produce a closure which, if called repeatedly, will produce results according to the lexical rules defined. When the input string is exhausted, NIL is returned, and the string will be unbound within the closure to allow garbage collection.
+
+The syntax of BODY is:
+
+    <doc string>?
+    (<alias definition>*)
+    <lexical action>*
+
+An <alias definition> is a list
+
+    (<keyword> <regex string>)
+
+The name of the keyword may be used in the <lexical action> regexes. A <lexical action> is a list
+
+    (<regex string> &body <code>)
+
+The <regex string> is matched against the input string greedily and in the order they are listed in the BODY. If a match succeeds, then it will execute <code>. Within <code>, the following symbols are bound:
+
+    $1, $2, ..., $n: String match on (unnamed) register n
+    $NAME          : String match on named register (?<NAME>...)
+    $@             : Entire string match.
+    $<, $>         : Start and end position of match.
+
+Generally, <code> should explicitly RETURN some token object for a semantic analyzer to examine. An explcit RETURN is needed.
+
+The <regex string> of the lexical action may use the names of the symbols defined in the <alias definition> forms. For example, given the alias definitions
+
+    ((:int \"\\\\d+\")
+     (:ident \"[a-z]+\"))
+
+one can use {{INT}} and {{IDENT}} within the <regex string>s of the <lexical action>.
+"
   (multiple-value-bind (definitions-and-patterns declarations doc-string)
       (alexandria:parse-body body :documentation t)
     (let* ((definitions (first definitions-and-patterns))
