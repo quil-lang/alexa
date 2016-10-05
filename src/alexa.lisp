@@ -165,20 +165,19 @@ one can use {{INT}} and {{IDENT}} within the <regex string>s of the <lexical act
            (check-type ,start (integer 0) ":START must be a non-negative integer.")
            (check-type ,end (integer 0) ":END must be a non-negative integer.")
            (assert (<= ,start ,end) (,start ,end) ":END must be not be less than :START.")
-           (let ((cl-ppcre:*allow-named-registers* t))
-             (lambda ()
-               (block nil
-                 (tagbody
-                    ,continue-tag
-                    ;; Have we finished matching string?
-                    (when (= ,start ,end)
-                      ;; Free STRING from closure to allow garbage
-                      ;; collection.
-                      (setq ,string nil)
-                      ;; Return NIL indicating generator is exhausted.
-                      (return nil))
-                    ;; Generate all pattern clauses.
-                    ,@(loop :for pat :in patterns
-                            :collect (generate-pattern pat continue-tag string start end))
-                    ;; Error clause: No match
-                    (error "Couldn't find match at position ~S" ,start))))))))))
+           (lambda ()
+             (block nil
+               (tagbody
+                  ,continue-tag
+                  ;; Have we finished matching string?
+                  (when (= ,start ,end)
+                    ;; Free STRING from closure to allow garbage
+                    ;; collection.
+                    (setq ,string nil)
+                    ;; Return NIL indicating generator is exhausted.
+                    (return nil))
+                  ;; Generate all pattern clauses.
+                  ,@(loop :for pat :in patterns
+                          :collect (generate-pattern pat continue-tag string start end))
+                  ;; Error clause: No match
+                  (error "Couldn't find match at position ~S" ,start)))))))))
