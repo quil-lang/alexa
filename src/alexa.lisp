@@ -162,9 +162,9 @@ one can use {{INT}} and {{IDENT}} within the <regex string>s of the <lexical act
         `(defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
            ,@(alexandria:ensure-list doc-string)
            ,@declarations
-           (check-type ,start (integer 0) ":START ")
-           (check-type ,end (integer 0))
-           (assert (<= ,start ,end) (,start ,end) "END must be not be less than START.")
+           (check-type ,start (integer 0) ":START must be a non-negative integer.")
+           (check-type ,end (integer 0) ":END must be a non-negative integer.")
+           (assert (<= ,start ,end) (,start ,end) ":END must be not be less than :START.")
            (let ((cl-ppcre:*allow-named-registers* t))
              (lambda ()
                (block nil
