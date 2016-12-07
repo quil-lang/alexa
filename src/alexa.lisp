@@ -103,6 +103,10 @@
                                                             resulting-regex
                                                             substitution)))))))
 
+(define-condition lexer-match-error (simple-error)
+  ()
+  (:documentation "Error to be signaled if the lexer didn't find a match."))
+
 (defmacro define-string-lexer (name &body body)
   "Define a lexical analyzer named NAME.
 
@@ -110,8 +114,9 @@ Defining a lexical analyzer is actually defining a function named NAME whose lam
 
     (STRING &KEY (START 0) (END (LENGTH STRING)))
 
-The STRING is the string to be analyzed, and START/END are the
-starting and ending positions to be looked at. Calling the function named NAME will produce a closure which, if called repeatedly, will produce results according to the lexical rules defined. When the input string is exhausted, NIL is returned, and the string will be unbound within the closure to allow garbage collection.
+The STRING is the string to be analyzed, and START/END are the starting and ending positions to be looked at. Calling the function named NAME will produce a closure which, if called repeatedly, will produce results according to the lexical rules defined. When the input string is exhausted, NIL is returned, and the string will be unbound within the closure to allow garbage collection.
+
+Signals LEXER-MATCH-ERROR as a continuable error if no match was found.
 
 The syntax of BODY is:
 
@@ -180,4 +185,9 @@ one can use {{INT}} and {{IDENT}} within the <regex string>s of the <lexical act
                   ,@(loop :for pat :in patterns
                           :collect (generate-pattern pat continue-tag string start end))
                   ;; Error clause: No match
-                  (error "Couldn't find match at position ~S" ,start)))))))))
+                  (cerror "Continue, returning NIL."
+                          'lexer-match-error
+                         :format-control "Couldn't find match at position ~D ~
+                                          within the lexer ~S."
+                         :format-arguments (list ,start ',name))
+                  nil))))))))
