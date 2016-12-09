@@ -187,7 +187,7 @@ one can use {{INT}} and {{IDENT}} within the <regex string>s of the <lexical act
                   ;; Error clause: No match
                   (cerror "Continue, returning NIL."
                           'lexer-match-error
-                         :format-control "Couldn't find match at position ~D ~
-                                          within the lexer ~S."
-                         :format-arguments (list ,start ',name))
+                          :format-control "Couldn't find match at position ~D ~
+                                           within the lexer ~S."
+                          :format-arguments (list ,start ',name))
                   nil))))))))
