@@ -2,7 +2,7 @@
 ;;;;
 ;;;; Author: Robert Smith
 ;;;;
-;;;; Copyright (c) 2016 Rigetti & Co, Inc.
+;;;; Copyright (c) 2016-2018 Rigetti & Co, Inc.
 
 (asdf:defsystem #:alexa
   :description "A lexical analyzer generator."
