@@ -11,6 +11,7 @@
   :version (:read-file-form "VERSION.txt")
   :depends-on (#:alexandria
                #:cl-ppcre)
+  :in-order-to ((asdf:test-op (asdf:test-op #:alexa-tests)))
   :serial t
   :components ((:static-file "LICENSE.txt")
                (:module src
