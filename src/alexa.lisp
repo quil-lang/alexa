@@ -30,11 +30,21 @@
       (values num-registers register-names))))
 
 (defstruct pattern
-  regex
-  short-circuit-p
+  ;; The regex string.
+  (regex nil :type string)
+  ;; Whether this pattern short-circuits.
+  (short-circuit-p nil :type boolean)
+  ;; The regex tree.
   parse-tree
-  num-registers
-  register-names
+  ;; The number of registers.
+  (num-registers nil :type integer)
+  ;; The name of the registers.
+  (register-names nil :type list)
+  ;; Name of the function that scans this regex.
+  (scanner-name nil :type symbol)
+  ;; Name of the function that fires this rule.
+  (fire-name nil :type symbol)
+  ;; The raw code forms that fire.
   code)
 
 (defun pattern-register-variables (pat package)
@@ -94,8 +104,7 @@
                             temp-reg-ends)
     ;; Perform the regex match.
     `(multiple-value-bind (,temp-match-start ,temp-match-end ,temp-reg-starts ,temp-reg-ends)
-         (cl-ppcre:scan ',(pattern-parse-tree pat) ,string-var :start ,start-var
-                                                               :end ,end-var)
+         (,(pattern-scanner-name pat) ,string-var ,start-var ,end-var)
        ;; Do we have a match? If not, we'll just move on to the next
        ;; thing to match.
        (if (null ,temp-match-start)
@@ -106,8 +115,8 @@
                ((= ,temp-match-start ,temp-match-end)
                 (empty-match-error ',(pattern-regex pat)))
 
-               ;; We have a match, but we need to see if it's the longest
-               ;; match we've seen so far.
+               ;; We have a match, but we need to see if it's the
+               ;; longest match we've seen so far.
                ((< ,max-match-length-var (- ,temp-match-end ,temp-match-start))
                 ;; Record this is the best we got so far.
                 (setq ,max-match-length-var (- ,temp-match-end ,temp-match-start)
@@ -116,7 +125,8 @@
                       ,match-end-var        ,temp-match-end
                       ,reg-starts-var       ,temp-reg-starts
                       ,reg-ends-var         ,temp-reg-ends)
-                ;; Execute immediately if we are going to short circuit.
+                ;; Execute immediately if we are going to short
+                ;; circuit.
                 ,(when (pattern-short-circuit-p pat)
                    `(go ,execute-tag)))))))))
 
@@ -137,10 +147,10 @@
            ($> (intern "$>" *package*)))
       `(let ((,$< ,match-start-var)
              (,$> ,match-end-var))
-         (declare (ignorable ,$< ,$>))
-         ;; We lazy bind these because we don't want to
-         ;; cons up the entire matched string if we
-         ;; don't need to.
+         (declare (type non-negative-fixnum ,$< ,$>)
+                  (ignorable ,$< ,$>))
+         ;; We lazy bind these because we don't want to cons up the
+         ;; entire matched string if we don't need to.
          (let-lazy ((,$@ (subseq ,string-var ,match-start-var ,match-end-var))
                     ,@(loop :for i :from 0
                             :for reg-var :in reg-vars
@@ -216,7 +226,7 @@ The <regex string> is matched against the input string greedily and in the order
     $@             : Entire string match.
     $<, $>         : Start and end position of match.
 
-Generally, <code> should explicitly RETURN some token object for a semantic analyzer to examine. An explicit RETURN is needed. If no RETURN is provided, then the lexer will throw away the match and move on as if the lexer were called again. (This is most often used to ignore matches, like whitespace.)
+Generally, <code> should explicitly RETURN some token object for a semantic analyzer to examine. Currently, only a single value can be returned. (All other values will be ignored.) An explicit RETURN is needed. If no RETURN is provided, then the lexer will throw away the match and move on as if the lexer were called again. (This is most often used to ignore matches, like whitespace.)
 
 The <regex string> of the lexical action may use the names of the symbols defined in the <alias definition> forms. For example, given the alias definitions
 
@@ -229,7 +239,8 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
   (multiple-value-bind (definitions-and-patterns declarations doc-string)
       (alexandria:parse-body body :documentation t)
     (let* ((definitions (first definitions-and-patterns))
-           (patterns (loop :for (pattern-spec . code) :in (rest definitions-and-patterns)
+           (patterns (loop :for i :from 0
+                           :for (pattern-spec . code) :in (rest definitions-and-patterns)
                            :for (regex eager)
                              := (typecase pattern-spec
                                   (string
@@ -251,14 +262,29 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
                                                 `(:SEQUENCE :START-ANCHOR
                                                             ,(cl-ppcre:parse-string
                                                               (fill-in-aliases definitions regex))))
-                           :collect (multiple-value-bind (num-regs names)
-                                        (extract-registers parse-tree)
-                                      (make-pattern :regex regex
-                                                    :short-circuit-p eager
-                                                    :parse-tree parse-tree
-                                                    :num-registers num-regs
-                                                    :register-names names
-                                                    :code code)))))
+                           :collect
+                           (multiple-value-bind (num-regs names)
+                               (extract-registers parse-tree)
+                             (let ((*package* (find-package :cl))) ; print symbols in full
+                               (make-pattern :regex regex
+                                             :short-circuit-p eager
+                                             :parse-tree parse-tree
+                                             :num-registers num-regs
+                                             :register-names names
+                                             ;; We generate these
+                                             ;; symbols in this
+                                             ;; package so they're
+                                             ;; overwritten upon
+                                             ;; redefinition.
+                                             :scanner-name
+                                             (alexandria:format-symbol
+                                              ':alexa-internal
+                                              "~S/SCANNER-~D" name i)
+                                             :fire-name
+                                             (alexandria:format-symbol
+                                              ':alexa-internal
+                                              "~S/FIRE-~D" name i)
+                                             :code code))))))
       (alexandria:with-gensyms (CONTINUE-TAG
                                 EXECUTE-TAG
                                 string start end
@@ -267,83 +293,144 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
                                 match-start
                                 match-end
                                 reg-starts
-                                reg-ends)
-        `(defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
-           ,@(alexandria:ensure-list doc-string)
-           ,@declarations
-           (check-type ,string simple-string)
-           (check-type ,start non-negative-fixnum ":START must be a non-negative fixnum.")
-           (check-type ,end non-negative-fixnum ":END must be a non-negative fixnum.")
-           (assert (<= ,start ,end) (,start ,end) ":END must be not be less than :START.")
-           (lambda ()
-             (block nil
-               ;; Our lexer state.
-               (let ((,match-rule-index -1)
-                     (,max-match-length 0)
-                     (,match-start      0)
-                     (,match-end        0)
-                     (,reg-starts       #())
-                     (,reg-ends         #()))
-                 (declare (type fixnum ,match-rule-index)
-                          (type non-negative-fixnum ,max-match-length ,match-start ,match-end)
-                          (type vector ,reg-starts ,reg-ends))
-                 (tagbody
-                    ,CONTINUE-TAG
-                    ;; If we continued, we need to have the state
-                    ;; reset. We only need to reset the variables that
-                    ;; determine which rules can get fired.
-                    (setq ,match-rule-index -1
-                          ,max-match-length 0)
-                    ;; Have we finished matching string?
-                    (when (= ,start ,end)
-                      ;; Free STRING from closure to allow garbage
-                      ;; collection.
-                      (setq ,string nil)
-                      ;; Return NIL indicating generator is exhausted.
-                      (return nil))
+                                reg-ends
+                                scanner
+                                result
+                                sentinel)
+        `(progn
+           ;; Generate the functions that scan and fire the rules. We
+           ;; generate DEFUNs here to make it easier to instrument the
+           ;; rules.
+           ,@(loop
+               :for rule-number :from 0
+               :for pat :in patterns
+               :for scanner-name := (pattern-scanner-name pat)
+               :for fire-name := (pattern-fire-name pat)
+               :collect `(declaim (notinline ,scanner-name ,fire-name))
+               :collect                 ; SCANNER
+               `(defun ,scanner-name (,string ,start ,end)
+                  ,(format nil "Scanning function for lexer ~S and rule #~D:~2%    ~A"
+                           name
+                           rule-number
+                           (pattern-regex pat)) ; Documentation
+                  ,@declarations                ; User declarations
+                  (declare (type simple-string ,string)
+                           (type non-negative-fixnum ,start ,end))
+                  (let ((,scanner (load-time-value
+                                   ;; Introduced in CL-PPCRE
+                                   ;; 2.1.0. We'll keep it
+                                   ;; double-coloned and IGNORABLE for
+                                   ;; backwards compatibility... for
+                                   ;; now...
+                                   (let ((cl-ppcre::*look-ahead-for-suffix* nil))
+                                     (declare (ignorable cl-ppcre:*look-ahead-for-suffix*))
+                                     (cl-ppcre:create-scanner ',(pattern-parse-tree pat)
+                                                              :single-line-mode t))
+                                   t)))
+                    (cl-ppcre:scan ,scanner ,string :start ,start :end ,end)))
+               :collect                 ; FIRE
+               `(defun ,fire-name (,string ,match-start ,match-end ,reg-starts ,reg-ends)
+                  ,(format nil "Firing function for lexer ~S and rule #~D:~2%    ~A"
+                           name
+                           rule-number
+                           (pattern-regex pat)) ; Documentation
+                  ,@declarations                ; User declarations
+                  (declare (type non-negative-fixnum ,match-start ,match-end)
+                           (type simple-string ,string)
+                           (type vector ,reg-starts ,reg-ends)
+                           (ignorable ,string ,reg-starts ,reg-ends))
+                  ;; Generate the code to execute for this rule.
+                  (block nil
+                    ,(generate-pattern-execution-code
+                      pat
+                      string
+                      match-start match-end
+                      reg-starts reg-ends)
+                    (return-from ,fire-name ',sentinel))))
+           ;; Generate the actual lexer generator.
+           (defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
+             ,@(alexandria:ensure-list doc-string)
+             ,@declarations
+             (check-type ,string simple-string)
+             (check-type ,start non-negative-fixnum ":START must be a non-negative fixnum.")
+             (check-type ,end non-negative-fixnum ":END must be a non-negative fixnum.")
+             (assert (<= ,start ,end) (,start ,end) ":END must be not be less than :START.")
+             (lambda ()
+               (block nil
+                 ;; Our lexer state.
+                 (let ((,match-rule-index -1)
+                       (,max-match-length 0)
+                       (,match-start      0)
+                       (,match-end        0)
+                       (,reg-starts       #())
+                       (,reg-ends         #()))
+                   (declare (type fixnum ,match-rule-index)
+                            (type non-negative-fixnum ,max-match-length ,match-start ,match-end)
+                            (type vector ,reg-starts ,reg-ends))
+                   (tagbody
+                      ,CONTINUE-TAG
+                      ;; If we continued, we need to have the state
+                      ;; reset. We only need to reset the variables that
+                      ;; determine which rules can get fired.
+                      (setq ,match-rule-index -1
+                            ,max-match-length 0)
+                      ;; Have we finished matching string?
+                      (when (= ,start ,end)
+                        ;; Free STRING from closure to allow garbage
+                        ;; collection.
+                        (setq ,string nil)
+                        ;; Return NIL indicating generator is exhausted.
+                        (return nil))
 
-                    ;; In the following pattern matching clauses, if a
-                    ;; match happens, we record the longest match
-                    ;; along with who matched, recorded in the
-                    ;; variables MAX-MATCH-LENGTH and MATCH-RULE-INDEX
-                    ;; respectively.
-                    ;;
-                    ;; Generate all pattern clauses.
-                    ,@(loop :for i :from 0
-                            :for pat :in patterns
-                            :collect (generate-pattern-match-code
-                                      pat EXECUTE-TAG
-                                      string start end
-                                      match-start match-end
-                                      reg-starts reg-ends
-                                      max-match-length match-rule-index i))
-
-                    ,EXECUTE-TAG
-                    (case ,match-rule-index
-                      ;; Code for each of the cases.
+                      ;; In the following pattern matching clauses, if a
+                      ;; match happens, we record the longest match
+                      ;; along with who matched, recorded in the
+                      ;; variables MAX-MATCH-LENGTH and MATCH-RULE-INDEX
+                      ;; respectively.
+                      ;;
+                      ;; Generate all pattern clauses.
                       ,@(loop :for i :from 0
                               :for pat :in patterns
-                              :collect `(,i
-                                         ;; Update our new start for
-                                         ;; the next round of
-                                         ;; matching.
-                                         (setq ,start ,match-end)
-                                         ;; Generate the code to
-                                         ;; execute for this rule.
-                                         ,(generate-pattern-execution-code
-                                           pat
-                                           string
-                                           match-start match-end
-                                           reg-starts reg-ends)
-                                         ;; Assuming the pattern code
-                                         ;; didn't exit, continue with
-                                         ;; the lex loop.
-                                         (go ,CONTINUE-TAG)))
-                      ;; Default code if nothing found.
-                      (otherwise
-                       (cerror "Continue, returning NIL."
-                               'lexer-match-error
-                               :format-control "Couldn't find match at position ~D ~
-                                                within the lexer ~S."
-                               :format-arguments (list ,start ',name))
-                       (return nil))))))))))))
+                              :collect (generate-pattern-match-code
+                                        pat EXECUTE-TAG
+                                        string start end
+                                        match-start match-end
+                                        reg-starts reg-ends
+                                        max-match-length match-rule-index i))
+
+                      ,EXECUTE-TAG
+                      (cond
+                        ((<= 0 ,match-rule-index ,(1- (length patterns)))
+                         ;; Update our new start for the next round of
+                         ;; matching.
+                         (setq ,start ,match-end)
+                         (let ((,result (funcall
+                                         (the function
+                                              (aref (load-time-value
+                                                     (vector
+                                                      ,@(loop
+                                                          :for pat :in patterns
+                                                          :collect
+                                                          `(function ,(pattern-fire-name pat))))
+                                                     t)
+                                                    ,match-rule-index))
+                                         ,string
+                                         ,match-start
+                                         ,match-end
+                                         ,reg-starts
+                                         ,reg-ends)))
+                           (cond
+                             ;; Assuming the pattern code
+                             ;; didn't exit, continue with
+                             ;; the lex loop.
+                             ((eq ,result ',sentinel) (go ,CONTINUE-TAG))
+                             ;; Otherwise return our answer.
+                             (t (return ,result)))))
+                        ;; Default code if nothing found.
+                        (t
+                         (cerror "Continue, returning NIL."
+                                 'lexer-match-error
+                                 :format-control "Couldn't find match at position ~D ~
+                                                  within the lexer ~S."
+                                 :format-arguments (list ,start ',name))
+                         (return nil)))))))))))))

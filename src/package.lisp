@@ -10,3 +10,6 @@
    #:lexer-match-error                  ; CONDITION
    )
   )
+
+(defpackage #:alexa-internal
+  (:documentation "A package to stash away generated symbols."))
