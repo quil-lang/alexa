@@ -194,6 +194,8 @@ Defining a lexical analyzer is actually defining a function named NAME whose lam
 
 The STRING is the string to be analyzed, and START/END are the starting and ending positions to be looked at. Calling the function named NAME will produce a closure which, if called repeatedly, will produce results according to the lexical rules defined. When the input string is exhausted, NIL is returned, and the string will be unbound within the closure to allow garbage collection.
 
+If STRING is not a SIMPLE-STRING, then it will be coerced into one (which will cons).
+
 The lexer will fire the action which had the longest match, and ties are broken based on the order of the actions (earlier ones are preferred). This rule can be selectively disabled for a particular action if one declares it to be a short circuiting (see below).
 
 Signals LEXER-MATCH-ERROR as a continuable error if no match was found.
@@ -351,86 +353,90 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
            (defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
              ,@(alexandria:ensure-list doc-string)
              ,@declarations
-             (check-type ,string simple-string)
+             (check-type ,string string)
              (check-type ,start non-negative-fixnum ":START must be a non-negative fixnum.")
              (check-type ,end non-negative-fixnum ":END must be a non-negative fixnum.")
              (assert (<= ,start ,end) (,start ,end) ":END must be not be less than :START.")
-             (lambda ()
-               (block nil
-                 ;; Our lexer state.
-                 (let ((,match-rule-index -1)
-                       (,max-match-length 0)
-                       (,match-start      0)
-                       (,match-end        0)
-                       (,reg-starts       #())
-                       (,reg-ends         #()))
-                   (declare (type fixnum ,match-rule-index)
-                            (type non-negative-fixnum ,max-match-length ,match-start ,match-end)
-                            (type vector ,reg-starts ,reg-ends))
-                   (tagbody
-                      ,CONTINUE-TAG
-                      ;; If we continued, we need to have the state
-                      ;; reset. We only need to reset the variables that
-                      ;; determine which rules can get fired.
-                      (setq ,match-rule-index -1
-                            ,max-match-length 0)
-                      ;; Have we finished matching string?
-                      (when (= ,start ,end)
-                        ;; Free STRING from closure to allow garbage
-                        ;; collection.
-                        (setq ,string nil)
-                        ;; Return NIL indicating generator is exhausted.
-                        (return nil))
+             (let ((,string (if (simple-string-p ,string)
+                                ,string
+                                (coerce ,string 'simple-string))))
+               (declare (type (or null simple-string) ,string))
+               (lambda ()
+                 (block nil
+                   ;; Our lexer state.
+                   (let ((,match-rule-index -1)
+                         (,max-match-length 0)
+                         (,match-start      0)
+                         (,match-end        0)
+                         (,reg-starts       #())
+                         (,reg-ends         #()))
+                     (declare (type fixnum ,match-rule-index)
+                              (type non-negative-fixnum ,max-match-length ,match-start ,match-end)
+                              (type vector ,reg-starts ,reg-ends))
+                     (tagbody
+                        ,CONTINUE-TAG
+                        ;; If we continued, we need to have the state
+                        ;; reset. We only need to reset the variables that
+                        ;; determine which rules can get fired.
+                        (setq ,match-rule-index -1
+                              ,max-match-length 0)
+                        ;; Have we finished matching string?
+                        (when (= ,start ,end)
+                          ;; Free STRING from closure to allow garbage
+                          ;; collection.
+                          (setq ,string nil)
+                          ;; Return NIL indicating generator is exhausted.
+                          (return nil))
 
-                      ;; In the following pattern matching clauses, if a
-                      ;; match happens, we record the longest match
-                      ;; along with who matched, recorded in the
-                      ;; variables MAX-MATCH-LENGTH and MATCH-RULE-INDEX
-                      ;; respectively.
-                      ;;
-                      ;; Generate all pattern clauses.
-                      ,@(loop :for i :from 0
-                              :for pat :in patterns
-                              :collect (generate-pattern-match-code
-                                        pat EXECUTE-TAG
-                                        string start end
-                                        match-start match-end
-                                        reg-starts reg-ends
-                                        max-match-length match-rule-index i))
+                        ;; In the following pattern matching clauses, if a
+                        ;; match happens, we record the longest match
+                        ;; along with who matched, recorded in the
+                        ;; variables MAX-MATCH-LENGTH and MATCH-RULE-INDEX
+                        ;; respectively.
+                        ;;
+                        ;; Generate all pattern clauses.
+                        ,@(loop :for i :from 0
+                                :for pat :in patterns
+                                :collect (generate-pattern-match-code
+                                          pat EXECUTE-TAG
+                                          string start end
+                                          match-start match-end
+                                          reg-starts reg-ends
+                                          max-match-length match-rule-index i))
 
-                      ,EXECUTE-TAG
-                      (cond
-                        ((<= 0 ,match-rule-index ,(1- (length patterns)))
-                         ;; Update our new start for the next round of
-                         ;; matching.
-                         (setq ,start ,match-end)
-                         (let ((,result (funcall
-                                         (the function
-                                              (aref (load-time-value
-                                                     (vector
-                                                      ,@(loop
-                                                          :for pat :in patterns
-                                                          :collect
-                                                          `(function ,(pattern-fire-name pat))))
-                                                     t)
-                                                    ,match-rule-index))
-                                         ,string
-                                         ,match-start
-                                         ,match-end
-                                         ,reg-starts
-                                         ,reg-ends)))
-                           (cond
-                             ;; Assuming the pattern code
-                             ;; didn't exit, continue with
-                             ;; the lex loop.
-                             ((eq ,result ',sentinel) (go ,CONTINUE-TAG))
-                             ;; Otherwise return our answer.
-                             (t (return ,result)))))
-                        ;; Default code if nothing found.
-                        (t
-                         (cerror "Continue, returning NIL."
-                                 'lexer-match-error
-                                 :format-control "Couldn't find match at position ~D ~
+                        ,EXECUTE-TAG
+                        (cond
+                          ((<= 0 ,match-rule-index ,(1- (length patterns)))
+                           ;; Update our new start for the next round of
+                           ;; matching.
+                           (setq ,start ,match-end)
+                           (let ((,result (funcall
+                                           (the function
+                                                (aref (load-time-value
+                                                       (vector
+                                                        ,@(loop
+                                                            :for pat :in patterns
+                                                            :collect
+                                                            `(function ,(pattern-fire-name pat))))
+                                                       t)
+                                                      ,match-rule-index))
+                                           ,string
+                                           ,match-start
+                                           ,match-end
+                                           ,reg-starts
+                                           ,reg-ends)))
+                             (cond
+                               ;; Assuming the pattern code
+                               ;; didn't exit, continue with
+                               ;; the lex loop.
+                               ((eq ,result ',sentinel) (go ,CONTINUE-TAG))
+                               ;; Otherwise return our answer.
+                               (t (return ,result)))))
+                          ;; Default code if nothing found.
+                          (t
+                           (cerror "Continue, returning NIL."
+                                   'lexer-match-error
+                                   :format-control "Couldn't find match at position ~D ~
                                                   within the lexer ~S."
-                                 :format-arguments (list ,start ',name))
-                         (return nil)))))))))))))
+                                   :format-arguments (list ,start ',name))
+                           (return nil))))))))))))))
