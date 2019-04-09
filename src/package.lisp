@@ -8,6 +8,11 @@
   (:export
    #:define-string-lexer                ; MACRO
    #:lexer-match-error                  ; CONDITION
+   #:lexer-match-error-lexer-name       ; READER
+   #:lexer-match-error-position         ; READER
+   #:no-match-error                     ; CONDITION
+   #:empty-match-error                  ; CONDITION
+   #:empty-match-error-pattern          ; READER
    )
   )
 

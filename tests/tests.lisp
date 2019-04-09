@@ -58,7 +58,18 @@
   (is-lex #'simple-lexer "a" '(#\a))
   (is-lex #'simple-lexer "b" '(#\b))
   (is-lex #'simple-lexer "ab" '(#\a #\b))
-  (is-lex #'simple-lexer " ab aaa bbb " '(#\a #\b #\a #\a #\a #\b #\b #\b)))
+  (is-lex #'simple-lexer " ab aaa bbb " '(#\a #\b #\a #\a #\a #\b #\b #\b))
+  (signals alexa:no-match-error
+    (lex #'simple-lexer "?")))
+
+(define-string-lexer empty-match-lexer
+  ()
+  ("" (return "goof")))
+
+(deftest test-empty-match-lexer ()
+  "Tests that empty matches don't loop forever."
+  (signals alexa:empty-match-error
+    (lex #'empty-match-lexer "a")))
 
 (define-string-lexer alias-lexer
   ((:num "\\d+"))
