@@ -56,8 +56,35 @@
     (loop :for i :from 1 :to (pattern-num-registers pat)
           :collect (alexandria:format-symbol package "$~A" (register-name i)))))
 
-(defun empty-match-error (regex)
-  (error "Empty match on pattern ~S. This will cause infinite looping." regex))
+(define-condition lexer-match-error (error)
+  ((lexer-name :initarg :lexer-name
+               :reader lexer-match-error-lexer-name
+               :type symbol
+               :documentation "The name of the lexer from which this condition came.")
+   (position :initarg :position
+             :reader lexer-match-error-position
+             :type unsigned-byte
+             :documentation "The position in the string being matched where the failure occured."))
+  (:documentation "Superclass of all possible runtime errors regarding matches during lexing."))
+
+(define-condition no-match-error (lexer-match-error)
+  ()
+  (:report (lambda (c s)
+             (format s "Couldn't find match at position ~D within the lexer ~S."
+                     (lexer-match-error-position c)
+                     (lexer-match-error-lexer-name c))))
+  (:documentation "Error to be signaled if the lexer didn't find a match."))
+
+(define-condition empty-match-error (lexer-match-error)
+  ((pattern :initarg :pattern
+            :reader empty-match-error-pattern))
+  (:report (lambda (c s)
+             (format s "Within the lexer ~S, got an empty match on pattern ~S at position ~
+                        ~D. This will cause infinite looping."
+                     (lexer-match-error-lexer-name c)
+                     (empty-match-error-pattern c)
+                     (lexer-match-error-position c))))
+  (:documentation "Error that is signaled when an empty string was matched."))
 
 (defmacro let-lazy (bindings &body body)
   (let* ((storage-variables (loop :for binding :in bindings
@@ -81,11 +108,12 @@
          ,@body))))
 
 ;;; Generate the code used to determine if there is a match.
-(defun generate-pattern-match-code (pat execute-tag
+(defun generate-pattern-match-code (name pat execute-tag
                                     string-var start-var end-var
                                     match-start-var match-end-var
                                     reg-starts-var reg-ends-var
                                     max-match-length-var match-rule-index-var i)
+  (check-type name symbol)
   (check-type pat pattern)
   (check-type execute-tag symbol)
   (check-type string-var symbol)
@@ -113,7 +141,12 @@
              (cond
                ;; Empty match. This could be a user bug.
                ((= ,temp-match-start ,temp-match-end)
-                (empty-match-error ',(pattern-regex pat)))
+                (cerror "Continue, returning NIL."
+                        'empty-match-error
+                        :pattern ',(pattern-regex pat)
+                        :lexer-name ',name
+                        :position ,temp-match-start)
+                (return nil))
 
                ;; We have a match, but we need to see if it's the
                ;; longest match we've seen so far.
@@ -181,10 +214,6 @@
                                                             resulting-regex
                                                             substitution)))))))
 
-(define-condition lexer-match-error (simple-error)
-  ()
-  (:documentation "Error to be signaled if the lexer didn't find a match."))
-
 (defmacro define-string-lexer (name &body body)
   "Define a lexical analyzer named NAME.
 
@@ -198,7 +227,11 @@ If STRING is not a SIMPLE-STRING, then it will be coerced into one (which will c
 
 The lexer will fire the action which had the longest match, and ties are broken based on the order of the actions (earlier ones are preferred). This rule can be selectively disabled for a particular action if one declares it to be a short circuiting (see below).
 
-Signals LEXER-MATCH-ERROR as a continuable error if no match was found.
+Signals a continuable error LEXER-MATCH-ERROR in the event of one of the following:
+
+    - NO-MATCH-ERROR is signaled if no match was found.
+
+    - EMPTY-MATCH-ERROR is signaled if a match would result in an infinite loop, because an empty string was matched.
 
 The syntax of BODY is:
 
@@ -238,6 +271,7 @@ The <regex string> of the lexical action may use the names of the symbols define
 one can use {{INT}} and {{IDENT}} within the <regex string>s of the <lexical action>.
 
 If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\". The EAGER option states that if a match occurs on this pattern, <code> should be executed immediately, disregarding the \"longest match\" rule. This can be used for certain kinds of optimizations."
+  (check-type name symbol)
   (multiple-value-bind (definitions-and-patterns declarations doc-string)
       (alexandria:parse-body body :documentation t)
     (let* ((definitions (first definitions-and-patterns))
@@ -398,6 +432,7 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
                         ,@(loop :for i :from 0
                                 :for pat :in patterns
                                 :collect (generate-pattern-match-code
+                                          name
                                           pat EXECUTE-TAG
                                           string start end
                                           match-start match-end
@@ -435,8 +470,7 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
                           ;; Default code if nothing found.
                           (t
                            (cerror "Continue, returning NIL."
-                                   'lexer-match-error
-                                   :format-control "Couldn't find match at position ~D ~
-                                                  within the lexer ~S."
-                                   :format-arguments (list ,start ',name))
+                                   'no-match-error
+                                   :lexer-name ',name
+                                   :position ,start)
                            (return nil))))))))))))))
