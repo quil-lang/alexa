@@ -126,3 +126,13 @@
     (test "+ - * /" '(:+ :- :* :/))
     (test "a123 a 123" '("a123" "a" 123))
     (test "pi pip pine pi_2" (list pi "pip" "pine" "pi_2"))))
+
+(alexa:define-string-lexer mv-lexer
+  ()
+  ("12" (return (values 1 2))))
+
+(deftest test-multiple-values ()
+  "Test that we can return multiple values just fine."
+  (multiple-value-bind (one two) (funcall (mv-lexer "12"))
+    (is (eql 1 one))
+    (is (eql 2 two))))

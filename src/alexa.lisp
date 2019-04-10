@@ -331,7 +331,6 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
                                 reg-starts
                                 reg-ends
                                 scanner
-                                result
                                 sentinel)
         `(progn
            ;; Generate the functions that scan and fire the rules. We
@@ -382,7 +381,7 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
                       string
                       match-start match-end
                       reg-starts reg-ends)
-                    (return-from ,fire-name ',sentinel))))
+                    (throw ',sentinel nil))))
            ;; Generate the actual lexer generator.
            (defun ,name (,string &key ((:start ,start) 0) ((:end ,end) (length ,string)))
              ,@(alexandria:ensure-list doc-string)
@@ -441,32 +440,35 @@ If the <pattern spec> uses EAGER, then the lexical action will \"short circuit\"
 
                         ,EXECUTE-TAG
                         (cond
+                          ;; NOTE: It might be faster but marginally
+                          ;; less safe to just check if
+                          ;; MATCH-RULE-INDEX is -1.
                           ((<= 0 ,match-rule-index ,(1- (length patterns)))
                            ;; Update our new start for the next round of
                            ;; matching.
                            (setq ,start ,match-end)
-                           (let ((,result (funcall
-                                           (the function
-                                                (aref (load-time-value
-                                                       (vector
-                                                        ,@(loop
-                                                            :for pat :in patterns
-                                                            :collect
-                                                            `(function ,(pattern-fire-name pat))))
-                                                       t)
-                                                      ,match-rule-index))
-                                           ,string
-                                           ,match-start
-                                           ,match-end
-                                           ,reg-starts
-                                           ,reg-ends)))
-                             (cond
-                               ;; Assuming the pattern code
-                               ;; didn't exit, continue with
-                               ;; the lex loop.
-                               ((eq ,result ',sentinel) (go ,CONTINUE-TAG))
-                               ;; Otherwise return our answer.
-                               (t (return ,result)))))
+                           (catch ',sentinel
+                             ;; The FUNCALL below has a possibility
+                             ;; of not returning by way of a THROW.
+                             (return
+                               (funcall
+                                (the function
+                                     (aref (load-time-value
+                                            (vector
+                                             ,@(loop
+                                                 :for pat :in patterns
+                                                 :collect
+                                                 `(function ,(pattern-fire-name pat))))
+                                            t)
+                                           ,match-rule-index))
+                                ,string
+                                ,match-start
+                                ,match-end
+                                ,reg-starts
+                                ,reg-ends)))
+                           ;; If we caught the sentinel, then we
+                           ;; continue with the lex loop.
+                           (go ,CONTINUE-TAG))
                           ;; Default code if nothing found.
                           (t
                            (cerror "Continue, returning NIL."
