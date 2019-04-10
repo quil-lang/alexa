@@ -191,4 +191,4 @@ If you have suggestions or questions, please file an issue in GitHub. If you hav
 
 This software is released under the BSD 3-clause license. See `LICENSE.txt` for details.
 
-Copyright © 2016–2018 Rigetti Computing
+Copyright © 2016–2019 Rigetti Computing
