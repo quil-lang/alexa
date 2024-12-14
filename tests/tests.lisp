@@ -80,6 +80,15 @@
   (dotimes (i 101)
     (is-lex #'alias-lexer (format nil "~D" i) (list i))))
 
+(deftest regression-test-for-github-issue-9 ()
+  "Test that the alias functionality replaces the patterns correctly."
+  (macroexpand
+   `(define-string-lexer alias-lexer-bug/github-issue9
+      "This used to fail to compile the regex: Missing right bracket to close character class. at position 6"
+      ;; Same regex, copy-pasted
+      ((:string "\"(?:[^\"\\\\]|\\\\.)*\""))
+      ("{{STRING}}" (return (token :term $@))))))
+
 (define-string-lexer position-lexer
   ()
   ("\\s+" nil)
