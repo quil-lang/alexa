@@ -297,7 +297,7 @@
         (let ((substitution (lookup-alias (extract-name-from-match match))))
           (setf resulting-regex (cl-ppcre:regex-replace-all `(:sequence ,match)
                                                             resulting-regex
-                                                            substitution)))))))
+                                                            (list substitution))))))))
 
 (defun parse-pattern-spec (spec)
   "Parse a \"pattern spec\", the places of DEFINE-LEXER where regex patterns are specified. The current supported syntax is:
